@@ -18,6 +18,7 @@ interface RankingPanelProps {
   onClose: () => void;
   initialSelected?: RankedSpot;
   onOpenDetail?: (spot: RankedSpot) => void;
+  userLocation?: { lat: number; lng: number };
 }
 
 function ChangeChip({ change }: { change: number }) {
@@ -46,18 +47,19 @@ const ChartTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
-export default function RankingPanel({ open, onClose, initialSelected, onOpenDetail }: RankingPanelProps) {
+export default function RankingPanel({ open, onClose, initialSelected, onOpenDetail, userLocation }: RankingPanelProps) {
   const [ranking, setRanking] = useState<RankedSpot[]>([]);
   const [selected, setSelected] = useState<RankedSpot | null>(initialSelected ?? null);
   const [period, setPeriod] = useState<Period>("1일");
 
-  // 랭킹 데이터 로드 (서비스 레이어 통해 가져옴)
+  // 랭킹 데이터 로드 (위치 정보 있으면 위치 기반, 없으면 기본값)
   useEffect(() => {
-    getRanking().then((data) => {
+    getRanking(userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : undefined).then((data) => {
       setRanking(data);
       if (!selected) setSelected(data[0] ?? null);
     });
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userLocation?.lat, userLocation?.lng]);
 
   // 외부에서 마커 클릭 시 해당 맛집으로 전환
   useEffect(() => {
