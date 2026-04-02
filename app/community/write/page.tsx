@@ -1,12 +1,19 @@
 "use client"
 
 import { useState, useEffect, Suspense } from "react"
-import { useRouter, useSearchParams } from "next/navigation" // useSearchParams 추가
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { ChevronLeft, MapPin, X, ImageIcon, Lock } from "lucide-react"
+import {
+  ChevronLeft,
+  MapPin,
+  X,
+  ImageIcon,
+  Lock,
+  User as UserIcon,
+} from "lucide-react" // UserIcon 추가
 import { cn } from "@/lib/utils"
+import { useAuth } from "@/hooks/useAuth"
 
-// 1. 파이어베이스 연동 (updateDoc, doc, getDoc 추가)
 import { db } from "@/lib/firebase"
 import {
   collection,
@@ -17,7 +24,6 @@ import {
   updateDoc,
 } from "firebase/firestore"
 
-// useSearchParams를 사용하는 컴포넌트는 Suspense로 감싸는 것이 Next.js 권장사항입니다.
 export default function WritePage() {
   return (
     <Suspense fallback={<div>Loading...</div>}>
@@ -29,17 +35,19 @@ export default function WritePage() {
 function WriteForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const editId = searchParams.get("edit") // URL에서 ?edit=ID 값 가져오기
+  const editId = searchParams.get("edit")
+
+  const { user, loading: authLoading } = useAuth()
 
   const [category, setCategory] = useState<"찍먹" | "자유">("찍먹")
   const [title, setTitle] = useState("")
   const [content, setContent] = useState("")
+  const [authorName, setAuthorName] = useState("") // 비로그인 유저용 닉네임 상태 추가
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [isEditMode, setIsEditMode] = useState(false)
   const [existingLocation, setExistingLocation] = useState("")
 
-  // 2. 수정 모드일 때 기존 데이터 불러오기
   useEffect(() => {
     if (editId) {
       const fetchPost = async () => {
@@ -51,8 +59,7 @@ function WriteForm() {
             setCategory(data.type)
             setTitle(data.title)
             setContent(data.content)
-            // 비밀번호는 보안상 다시 입력하게 하거나,
-            // 상세페이지에서 이미 검증했으므로 기존 비번을 세팅해둘 수 있습니다.
+            setAuthorName(data.author || "") // 수정 시 기존 닉네임 로드
             setPassword(data.password)
             setIsEditMode(true)
             setExistingLocation(data.location || "")
@@ -65,10 +72,14 @@ function WriteForm() {
     }
   }, [editId])
 
+  // 제출 비활성화 조건: 제목, 본문, 비번 필수 + (로그인 안했으면 닉네임도 필수)
   const isSubmitDisabled =
-    !title.trim() || !content.trim() || !password.trim() || isLoading
+    !title.trim() ||
+    !content.trim() ||
+    !password.trim() ||
+    (!user && !authorName.trim()) || // 비로그인 시 닉네임 체크 추가
+    isLoading
 
-  // 3. 등록/수정 통합 핸들러
   const handleSubmit = async () => {
     if (isSubmitDisabled) return
 
@@ -79,25 +90,31 @@ function WriteForm() {
         title: title.trim(),
         content: content.trim(),
         password: password,
-        // 찍먹일 때만 기본 예시 장소를 넣거나, 나중에 연동할 장소 상태값을 넣습니다.
-        location: isEditMode ? existingLocation : "",
+        location: isEditMode
+          ? existingLocation
+          : category === "자유"
+            ? "성남시 수정구"
+            : "",
+        // 로그인 유저면 유저 정보, 아니면 입력한 닉네임 사용
+        author: user
+          ? user.displayName || user.email?.split("@")[0]
+          : authorName.trim(),
+        authorId: user ? user.uid : null,
       }
 
       if (isEditMode && editId) {
-        // 기존 문서 업데이트
         const docRef = doc(db, "posts", editId)
         await updateDoc(docRef, {
           ...postData,
-          updatedAt: serverTimestamp(), // 수정 시간 기록
+          updatedAt: serverTimestamp(),
         })
         alert("수정되었습니다!")
       } else {
-        // 새 문서 추가
         await addDoc(collection(db, "posts"), {
           ...postData,
-          author: "Winsam",
           comments: 0,
           likes: 0,
+          likedBy: [],
           createdAt: serverTimestamp(),
         })
         alert("등록되었습니다!")
@@ -115,7 +132,6 @@ function WriteForm() {
 
   return (
     <div className="mx-auto min-h-screen max-w-2xl bg-white transition-colors duration-300 dark:bg-zinc-950">
-      {/* 상단 네비바 */}
       <div className="fixed top-0 z-50 flex w-full max-w-2xl items-center justify-between bg-white/80 px-4 py-4 backdrop-blur-md dark:bg-zinc-950/80">
         <div className="flex items-center gap-2">
           <Button
@@ -145,7 +161,6 @@ function WriteForm() {
       </div>
 
       <div className="px-4 pt-24 pb-10">
-        {/* 카테고리 선택 */}
         <div className="mb-6 flex gap-2">
           {["찍먹", "자유"].map((t) => (
             <button
@@ -163,7 +178,20 @@ function WriteForm() {
           ))}
         </div>
 
-        {/* 비밀번호 입력란 (수정 모드일 때는 읽기 전용으로 두거나 확인용으로 사용) */}
+        {/* 닉네임 입력란: 로그인하지 않았을 때만 노출 */}
+        {!user && (
+          <div className="mb-3 flex items-center gap-2 rounded-2xl bg-zinc-50 px-4 py-3 dark:bg-zinc-900/50">
+            <UserIcon className="h-4 w-4 text-zinc-400" />
+            <input
+              type="text"
+              placeholder="사용하실 닉네임을 입력하세요"
+              value={authorName}
+              onChange={(e) => setAuthorName(e.target.value)}
+              className="w-full bg-transparent text-sm focus:outline-none dark:text-zinc-200"
+            />
+          </div>
+        )}
+
         <div className="mb-6 flex items-center gap-2 rounded-2xl bg-zinc-50 px-4 py-3 dark:bg-zinc-900/50">
           <Lock className="h-4 w-4 text-zinc-400" />
           <input
@@ -175,19 +203,17 @@ function WriteForm() {
           />
         </div>
 
-        {/* 장소 추가 (찍먹 카테고리일 때만 노출) */}
         {category === "찍먹" && (
           <div className="mb-6">
             <button className="flex w-full items-center gap-2 rounded-2xl border border-dashed border-zinc-200 p-4 text-zinc-400 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900/50">
               <MapPin className="h-5 w-5 text-orange-500" />
               <span className="text-sm font-medium">
-                맛집 장소를 태그해 주세요 (선택)
+                {existingLocation || "맛집 장소를 태그해 주세요 (선택)"}
               </span>
             </button>
           </div>
         )}
 
-        {/* 제목 입력 */}
         <input
           type="text"
           placeholder="제목을 입력하세요"
@@ -196,7 +222,6 @@ function WriteForm() {
           className="mb-4 w-full bg-transparent text-xl font-bold placeholder:text-zinc-300 focus:outline-none dark:text-zinc-100 dark:placeholder:text-zinc-700"
         />
 
-        {/* 본문 입력 */}
         <textarea
           placeholder="이곳에 내용을 입력하세요."
           value={content}
