@@ -312,7 +312,12 @@ export default function PostDetailPage() {
             type="text"
             value={commentInput}
             onChange={(e) => setCommentInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleCommentSubmit()}
+            // ⭐ nativeEvent.isComposing을 체크하여 한글 입력 중 엔터 중복 실행을 방지합니다.
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                handleCommentSubmit()
+              }
+            }}
             placeholder={
               user ? "댓글을 남겨보세요" : "로그인 후 이용 가능합니다"
             }
