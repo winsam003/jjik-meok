@@ -86,7 +86,6 @@ export default function Page() {
       zoomControl: false,
     });
 
-    // 서비스 레이어에서 랭킹 데이터 가져와서 마커 생성
     getRanking().then((spots) => {
       spots.forEach((spot) => {
         const marker = new window.naver.maps.Marker({
@@ -121,7 +120,6 @@ export default function Page() {
             <span className="text-xl font-bold tracking-tight text-orange-500">찍먹</span>
           </div>
 
-          {/* 버튼 영역 */}
           {!loading && (
             <div className="flex items-center gap-3">
               {user ? (
