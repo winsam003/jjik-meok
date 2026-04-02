@@ -74,7 +74,7 @@ export default function PostDetailPage() {
     return () => unsubscribe()
   }, [params.id, router])
 
-  // 2. 댓글 등록 함수
+  // 2. 댓글 등록 함수 (단순 카운트 업데이트)
   const handleCommentSubmit = async () => {
     if (!user) {
       alert("로그인이 필요합니다.")
@@ -91,11 +91,17 @@ export default function PostDetailPage() {
         createdAt: serverTimestamp(),
       })
 
-      // 게시글의 댓글 수(comments) 카운트 업데이트
+      // ⭐ 그냥 현재 DB에 저장된 post.comments 숫자에 +1만 합니다. (중복 체크 X)
       const postRef = doc(db, "posts", params.id as string)
       await updateDoc(postRef, {
         comments: (post.comments || 0) + 1,
       })
+
+      // 로컬 상태도 즉시 반영해서 목록에 바로 전달되게 함
+      setPost((prev: any) => ({
+        ...prev,
+        comments: (prev.comments || 0) + 1,
+      }))
 
       setCommentInput("") // 입력창 초기화
     } catch (error) {
@@ -135,7 +141,6 @@ export default function PostDetailPage() {
     }
   }
 
-  // --- 수정 기능 복구 ---
   const handleEdit = () => {
     const inputPassword = prompt("수정을 위해 비밀번호를 입력해주세요.")
     if (!inputPassword) return
@@ -146,7 +151,6 @@ export default function PostDetailPage() {
     router.push(`/community/write?edit=${post.id}`)
   }
 
-  // --- 삭제 기능 복구 ---
   const handleDelete = async () => {
     const inputPassword = prompt("삭제를 위해 비밀번호를 입력해주세요.")
     if (!inputPassword) return
@@ -181,7 +185,6 @@ export default function PostDetailPage() {
 
   return (
     <div className="mx-auto min-h-screen max-w-2xl bg-white px-4 pt-24 pb-40 transition-colors duration-300 dark:bg-zinc-950">
-      {/* 상단 네비바 */}
       <div className="fixed top-0 right-0 left-0 z-50 flex justify-center bg-white/80 backdrop-blur-md dark:bg-zinc-950/80">
         <div className="flex w-full max-w-2xl items-center justify-between px-4 py-4">
           <Button
@@ -214,7 +217,6 @@ export default function PostDetailPage() {
         </div>
       </div>
 
-      {/* 게시글 본문 */}
       <div className="mb-4 flex items-center gap-2">
         <span className="rounded-full bg-zinc-900 px-3 py-1 text-[11px] font-bold text-white dark:bg-zinc-100 dark:text-zinc-950">
           {post.type}
@@ -252,7 +254,6 @@ export default function PostDetailPage() {
         ))}
       </div>
 
-      {/* 반응 섹션 */}
       <div className="mb-10 flex items-center gap-6 border-t border-zinc-50 pt-6 dark:border-zinc-900">
         <button
           onClick={handleLike}
@@ -272,7 +273,6 @@ export default function PostDetailPage() {
         </div>
       </div>
 
-      {/* --- 댓글 리스트 영역 --- */}
       <div className="space-y-6">
         <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-50">
           댓글 {comments.length}
@@ -303,9 +303,9 @@ export default function PostDetailPage() {
             첫 댓글을 남겨보세요!
           </p>
         )}
+        <div className="h-20" />
       </div>
 
-      {/* --- 하단 댓글 입력창 --- */}
       <div className="fixed right-0 bottom-35 left-0 z-50 flex justify-center border-t border-zinc-100 bg-white px-4 py-4 dark:border-zinc-900 dark:bg-zinc-950">
         <div className="flex w-full max-w-2xl items-center gap-3 rounded-2xl bg-zinc-100 px-4 py-3 dark:bg-zinc-900">
           <input

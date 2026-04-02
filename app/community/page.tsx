@@ -119,7 +119,7 @@ export default function CommunityPage() {
 
   // 4. 탭 필터링 (이미 쿼리에서 필터링하는 것이 좋으나 기존 구조 유지)
   const filteredPosts = posts.filter((p) => p.type === activeTab)
-
+  console.log(filteredPosts)
   return (
     <div className="mx-auto min-h-screen max-w-2xl bg-white px-4 pt-24 pb-32 transition-colors duration-300 dark:bg-zinc-950">
       {/* 1. 상단 헤더 */}
