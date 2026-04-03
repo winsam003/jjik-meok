@@ -1,12 +1,11 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react" // useRef 추가
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Pencil, MessageCircle, ThumbsUp, MapPin } from "lucide-react"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
 
-// 1. 파이어베이스 관련 임포트 (limit, startAfter 등 추가)
 import { db } from "@/lib/firebase"
 import {
   collection,
@@ -19,23 +18,23 @@ import {
 } from "firebase/firestore"
 
 const TABS = ["찍먹", "자유"]
-const PAGE_SIZE = 20 // 20개씩 불러오기
+const PAGE_SIZE = 20
 
 export default function CommunityPage() {
   const [activeTab, setActiveTab] = useState("찍먹")
   const [posts, setPosts] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [lastDoc, setLastDoc] = useState<any>(null) // 마지막 문서 저장
-  const [hasMore, setHasMore] = useState(true) // 더 가져올 데이터가 있는지
-  const observerRef = useRef<HTMLDivElement>(null) // 스크롤 감지용
+  const [lastDoc, setLastDoc] = useState<any>(null)
+  const [hasMore, setHasMore] = useState(true)
+  const observerRef = useRef<HTMLDivElement>(null)
 
-  // 2. 실시간 데이터 가져오기 로직 (첫 페이지)
+  // 1. 실시간 데이터 가져오기 로직
   useEffect(() => {
     setIsLoading(true)
+    setPosts([]) // 탭 변경 시 기존 포스트 완전 초기화 (중복 방지 핵심)
     setLastDoc(null)
     setHasMore(true)
 
-    // 탭이 바뀔 때마다 처음 20개를 가져오는 쿼리
     const q = query(
       collection(db, "posts"),
       orderBy("createdAt", "desc"),
@@ -60,12 +59,13 @@ export default function CommunityPage() {
     })
 
     return () => unsubscribe()
-  }, [activeTab])
+  }, [activeTab]) // 탭이 바뀔 때마다 리스너 재설정 및 초기화
 
-  // 3. 추가 데이터 불러오기 (무한 스크롤)
+  // 2. 추가 데이터 불러오기 (무한 스크롤)
   const fetchMorePosts = async () => {
     if (!lastDoc || !hasMore || isLoading) return
 
+    setIsLoading(true) // 추가 로딩 중 상태 처리
     const nextQ = query(
       collection(db, "posts"),
       orderBy("createdAt", "desc"),
@@ -73,40 +73,51 @@ export default function CommunityPage() {
       limit(PAGE_SIZE)
     )
 
-    const querySnapshot = await getDocs(nextQ)
-    if (querySnapshot.empty) {
-      setHasMore(false)
-      return
+    try {
+      const querySnapshot = await getDocs(nextQ)
+      if (querySnapshot.empty) {
+        setHasMore(false)
+        return
+      }
+
+      const nextPosts = querySnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        time: formatTime(doc.data().createdAt),
+      }))
+
+      // 기존 데이터와 중복되지 않는 것만 필터링하여 추가
+      setPosts((prev) => {
+        const existingIds = new Set(prev.map((p) => p.id))
+        const uniqueNextPosts = nextPosts.filter((p) => !existingIds.has(p.id))
+        return [...prev, ...uniqueNextPosts]
+      })
+
+      setLastDoc(querySnapshot.docs[querySnapshot.docs.length - 1])
+      if (querySnapshot.docs.length < PAGE_SIZE) setHasMore(false)
+    } catch (error) {
+      console.error("Fetch more posts error:", error)
+    } finally {
+      setIsLoading(false)
     }
-
-    const nextPosts = querySnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-      time: formatTime(doc.data().createdAt),
-    }))
-
-    setPosts((prev) => [...prev, ...nextPosts])
-    setLastDoc(querySnapshot.docs[querySnapshot.docs.length - 1])
-    if (querySnapshot.docs.length < PAGE_SIZE) setHasMore(false)
   }
 
   // 스크롤 감지 Observer 설정
   useEffect(() => {
-    if (isLoading) return
+    if (isLoading || !hasMore) return
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore) {
+        if (entries[0].isIntersecting) {
           fetchMorePosts()
         }
       },
-      { threshold: 1.0 }
+      { threshold: 0.1 }
     )
 
     if (observerRef.current) observer.observe(observerRef.current)
     return () => observer.disconnect()
   }, [lastDoc, hasMore, isLoading])
 
-  // 시간 변환 함수 분리
   function formatTime(createdAt: any) {
     if (!createdAt) return "방금 전"
     const date = createdAt.toDate()
@@ -117,12 +128,10 @@ export default function CommunityPage() {
     return date.toLocaleDateString()
   }
 
-  // 4. 탭 필터링 (이미 쿼리에서 필터링하는 것이 좋으나 기존 구조 유지)
   const filteredPosts = posts.filter((p) => p.type === activeTab)
-  console.log(filteredPosts)
+
   return (
     <div className="mx-auto min-h-screen max-w-2xl bg-white px-4 pt-24 pb-32 transition-colors duration-300 dark:bg-zinc-950">
-      {/* 1. 상단 헤더 */}
       <div className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-black tracking-tight text-zinc-900 dark:text-zinc-50">
@@ -142,7 +151,6 @@ export default function CommunityPage() {
         </Link>
       </div>
 
-      {/* 2. 시그니처 탭 메뉴 */}
       <div className="mb-8 flex gap-4 border-b border-zinc-100 dark:border-zinc-800">
         {TABS.map((tab) => (
           <button
@@ -163,9 +171,8 @@ export default function CommunityPage() {
         ))}
       </div>
 
-      {/* 3. 포스트 리스트 */}
       <div className="space-y-6">
-        {posts.length > 0
+        {filteredPosts.length > 0
           ? filteredPosts.map((post) => (
               <Link
                 key={post.id}
@@ -217,7 +224,6 @@ export default function CommunityPage() {
               </div>
             )}
 
-        {/* 무한 스크롤 트리거 & 로딩 표시 */}
         <div ref={observerRef} className="py-10 text-center text-zinc-400">
           {isLoading
             ? "데이터를 가져오는 중..."
