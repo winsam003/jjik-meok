@@ -512,7 +512,7 @@ export default function Page() {
           updateSearchRadiusCircle(lat, lng, map)
         }
 
-        reloadSpotsIfMoved(lat, lng, map, activeCategory)
+        reloadSpotsIfMoved(lat, lng, map, activeCategoryRef.current, activeSubCategoryRef.current)
       },
       (err) => {
         console.warn("위치 오류:", err.message)
