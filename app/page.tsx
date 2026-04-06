@@ -133,6 +133,7 @@ export default function Page() {
   const watchIdRef = useRef<number | null>(null)
   const lastRankingLatLngRef = useRef<{ lat: number; lng: number } | null>(null)
   const isFirstLocationRef = useRef(true)
+  const userDraggedRef = useRef(false) // 유저가 지도를 드래그했는지 여부
   const activeCategoryRef = useRef<KakaoCategoryCode | null>(null)
   const activeSubCategoryRef = useRef<string | null>(null)
 
@@ -419,6 +420,7 @@ export default function Page() {
 
   // ── 지도 드래그 후 해당 위치 Spot 로드 ────────────────────────────────
   function handleMapDragEnd(map: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+    userDraggedRef.current = true // GPS 재로드 차단
     const center = map.getCenter()
     const lat = center.lat()
     const lng = center.lng()
@@ -512,7 +514,10 @@ export default function Page() {
           updateSearchRadiusCircle(lat, lng, map)
         }
 
-        reloadSpotsIfMoved(lat, lng, map, activeCategoryRef.current, activeSubCategoryRef.current)
+        // 유저가 지도를 드래그한 상태면 GPS로 Spot 재로드 안 함 (위치 마커만 업데이트)
+        if (!userDraggedRef.current) {
+          reloadSpotsIfMoved(lat, lng, map, activeCategoryRef.current, activeSubCategoryRef.current)
+        }
       },
       (err) => {
         console.warn("위치 오류:", err.message)
@@ -576,10 +581,20 @@ export default function Page() {
     const map = mapInstanceRef.current
     if (!map) return
 
+    userDraggedRef.current = false // GPS 기반 재로드 복원
+    lastRankingLatLngRef.current = null // 강제 재로드
+
     if (userLocation) {
-      // 이미 위치 알고 있으면 바로 이동
+      // 이미 위치 알고 있으면 바로 이동 + Spot 재로드
       map.setCenter(new window.naver.maps.LatLng(userLocation.lat, userLocation.lng))
       map.setZoom(15)
+      updateSearchRadiusCircle(userLocation.lat, userLocation.lng, map)
+      getRanking({
+        lat: userLocation.lat,
+        lng: userLocation.lng,
+        categoryCode: activeCategoryRef.current,
+        subFilter: activeSubCategoryRef.current,
+      }).then((spots) => placeMarkers(spots, map))
     } else {
       // 위치 추적 재시도
       if (watchIdRef.current !== null) {
