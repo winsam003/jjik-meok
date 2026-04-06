@@ -8,17 +8,62 @@
  * Firestore 컬렉션: spots / reviews / likes / ratingHistory
  */
 
-import type { RankedSpot, OpeningHours, TimeSeriesPoint } from "@/lib/types"
+import type { RankedSpot, OpeningHours } from "@/lib/types"
 import {
   searchNearbyByCategory,
   KAKAO_CATEGORY,
   type KakaoPlace,
+  type KakaoCategoryCode,
 } from "./kakao.service"
 
-// ─── Firestore 연동 시 활성화 ────────────────────────────────────────────
-// import { db } from "@/lib/firebase"
-// import { doc, getDoc, collection, getDocs, query, orderBy, limit } from "firebase/firestore"
-// ────────────────────────────────────────────────────────────────────────
+/** 앱에서 사용하는 카테고리 목록 */
+export const SPOT_CATEGORIES = [
+  { label: "전체",    code: null,                        emoji: "🗺️" },
+  { label: "음식점",  code: KAKAO_CATEGORY.RESTAURANT,   emoji: "🍽️" },
+  { label: "카페",    code: KAKAO_CATEGORY.CAFE,          emoji: "☕" },
+  { label: "편의점",  code: KAKAO_CATEGORY.CONVENIENCE,  emoji: "🏪" },
+  { label: "병원",    code: KAKAO_CATEGORY.HOSPITAL,     emoji: "🏥" },
+  { label: "약국",    code: KAKAO_CATEGORY.PHARMACY,     emoji: "💊" },
+] as const
+
+export type SpotCategoryLabel = (typeof SPOT_CATEGORIES)[number]["label"]
+
+/** 카테고리별 서브카테고리 (category_name 필터링용) */
+export const SPOT_SUBCATEGORIES: Record<string, Array<{ label: string; emoji: string; keyword: string }>> = {
+  FD6: [
+    { label: "한식",      emoji: "🍚", keyword: "한식" },
+    { label: "일식",      emoji: "🍣", keyword: "일식" },
+    { label: "중식",      emoji: "🥢", keyword: "중식" },
+    { label: "양식",      emoji: "🍝", keyword: "양식" },
+    { label: "치킨",      emoji: "🍗", keyword: "치킨" },
+    { label: "분식",      emoji: "🍜", keyword: "분식" },
+    { label: "고기",      emoji: "🥩", keyword: "고기" },
+    { label: "패스트푸드", emoji: "🍔", keyword: "패스트푸드" },
+    { label: "술집",      emoji: "🍺", keyword: "술집" },
+    { label: "해산물",    emoji: "🦞", keyword: "해산물" },
+  ],
+  CE7: [
+    { label: "카페",      emoji: "☕", keyword: "카페" },
+    { label: "베이커리",  emoji: "🥐", keyword: "베이커리" },
+    { label: "디저트",    emoji: "🍰", keyword: "디저트" },
+    { label: "아이스크림", emoji: "🍦", keyword: "아이스크림" },
+    { label: "주스",      emoji: "🧃", keyword: "주스" },
+  ],
+  HP8: [
+    { label: "내과",      emoji: "🩺", keyword: "내과" },
+    { label: "치과",      emoji: "🦷", keyword: "치과" },
+    { label: "피부과",    emoji: "💆", keyword: "피부과" },
+    { label: "안과",      emoji: "👁️", keyword: "안과" },
+    { label: "정형외과",  emoji: "🦴", keyword: "정형외과" },
+    { label: "한의원",    emoji: "🌿", keyword: "한의원" },
+    { label: "소아과",    emoji: "👶", keyword: "소아과" },
+    { label: "이비인후과", emoji: "👂", keyword: "이비인후과" },
+    { label: "산부인과",  emoji: "🤰", keyword: "산부인과" },
+    { label: "정신건강의학과", emoji: "🧠", keyword: "정신건강의학과" },
+  ],
+}
+import { db } from "@/lib/firebase"
+import { doc, getDoc } from "firebase/firestore"
 
 // ─── 카테고리별 기본 사진 (Unsplash) ────────────────────────────────────
 const CATEGORY_PHOTOS: Record<string, string[]> = {
@@ -53,12 +98,6 @@ function generateTicker(id: string): string {
   return ticker
 }
 
-/** 카카오 place ID로 기준 평점 생성 (결정론적, 3.5 ~ 4.9) */
-function getBaseRating(id: string): number {
-  const hash = parseInt(id, 10) || id.split("").reduce((a, c) => a + c.charCodeAt(0), 0)
-  return Math.round((3.5 + (hash % 15) / 10) * 10) / 10
-}
-
 /** 거리 문자열 포맷 */
 function formatDistance(distance: string): string {
   const m = parseInt(distance, 10)
@@ -74,45 +113,41 @@ function defaultOpeningHours(): OpeningHours {
   return { mon: open, tue: open, wed: open, thu: open, fri: open, sat: open, sun: closed }
 }
 
-// ─── 시계열 데이터 생성 (추후 Firestore ratingHistory 로 교체) ──────────
+// ─── Firestore stats 병합 ────────────────────────────────────────────────
 
-function makeDaily(base: number): TimeSeriesPoint[] {
-  return ["0시", "2시", "4시", "6시", "8시", "10시", "12시", "14시", "16시", "18시", "20시", "22시"].map(
-    (time, i) => ({
-      time,
-      rating: Math.max(1, Math.min(5, parseFloat((base + Math.sin(i) * 0.15).toFixed(1)))),
-    })
-  )
+interface FirestoreSpotStats {
+  rating: number
+  reviewCount: number
+  todayReviews: number
+  likeCount: number
 }
 
-function makeWeekly(base: number): TimeSeriesPoint[] {
-  return ["월", "화", "수", "목", "금", "토", "일"].map((time, i) => ({
-    time,
-    rating: Math.max(1, Math.min(5, parseFloat((base + Math.cos(i) * 0.2).toFixed(1)))),
-  }))
-}
-
-function makeMonthly(base: number): TimeSeriesPoint[] {
-  return Array.from({ length: 30 }, (_, i) => ({
-    time: `${i + 1}일`,
-    rating: Math.max(1, Math.min(5, parseFloat((base + Math.sin(i * 0.3) * 0.25).toFixed(1)))),
-  }))
-}
-
-function make3Month(base: number): TimeSeriesPoint[] {
-  return ["1월", "2월", "3월"].flatMap((m, mi) =>
-    Array.from({ length: 4 }, (_, i) => ({
-      time: `${m} ${i + 1}주`,
-      rating: Math.max(1, Math.min(5, parseFloat((base + Math.sin((mi * 4 + i) * 0.4) * 0.3).toFixed(1)))),
-    }))
-  )
+async function fetchFirestoreStats(spotId: string): Promise<FirestoreSpotStats | null> {
+  try {
+    const snap = await getDoc(doc(db, "spots", spotId))
+    if (!snap.exists()) return null
+    const d = snap.data()
+    return {
+      rating: d.rating ?? 0,
+      reviewCount: d.reviewCount ?? 0,
+      todayReviews: d.todayReviews ?? 0,
+      likeCount: d.likeCount ?? 0,
+    }
+  } catch {
+    return null
+  }
 }
 
 // ─── 카카오 Place → RankedSpot 변환 ─────────────────────────────────────
 
-function kakaoToRankedSpot(place: KakaoPlace, rank: number): RankedSpot {
-  const baseRating = getBaseRating(place.id)
+function kakaoToRankedSpot(place: KakaoPlace, rank: number = 0, fsStats?: FirestoreSpotStats | null): RankedSpot {
   const photos = CATEGORY_PHOTOS[place.category_group_code] ?? DEFAULT_PHOTOS
+
+  // Firestore 실데이터 우선 사용, 리뷰 없으면 rating 0 (가짜 데이터 표시 안 함)
+  const reviewCount = fsStats?.reviewCount ?? 0
+  const rating = reviewCount > 0 ? (fsStats?.rating ?? 0) : 0
+  const todayReviews = fsStats?.todayReviews ?? 0
+  const likeCount = fsStats?.likeCount ?? 0
 
   // 카테고리명 정리 (ex. "음식점 > 한식 > 국밥" → "한식")
   const categoryParts = place.category_name.split(" > ")
@@ -134,31 +169,24 @@ function kakaoToRankedSpot(place: KakaoPlace, rank: number): RankedSpot {
     openingHours: defaultOpeningHours(),
     photos,
 
-    // ── 추후 Firestore spots/{id} 에서 로드 ──────────────────────────────
-    rating: baseRating,
-    reviewCount: 0,
-    todayReviews: 0,
-    likeCount: 0,
+    rating,
+    reviewCount,
+    todayReviews,
+    likeCount,
     change: 0,
     waiting: 0,
     revisitRate: 0,
     avgPrice: 0,
-    high52: baseRating,
-    low52: Math.max(3.0, baseRating - 0.5),
-    // ─────────────────────────────────────────────────────────────────────
+    high52: rating,
+    low52: rating > 0 ? Math.max(1.0, rating - 0.5) : 0,
 
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
 
     rank,
 
-    // ── 추후 Firestore ratingHistory/{spotId} 에서 로드 ──────────────────
-    timeSeries: {
-      "1일": makeDaily(baseRating),
-      "1주": makeWeekly(baseRating),
-      "1달": makeMonthly(baseRating),
-      "3달": make3Month(baseRating),
-    },
+    // 차트 데이터는 ranking-panel에서 getRatingHistory로 lazy load
+    timeSeries: { "1일": [], "1주": [], "1달": [], "3달": [] },
   }
 }
 
@@ -177,43 +205,80 @@ export async function getRanking(options?: {
   lng?: number
   radius?: number
   count?: number
+  categoryCode?: KakaoCategoryCode | null
+  subFilter?: string | null
 }): Promise<RankedSpot[]> {
   const lat = options?.lat ?? 37.4979
   const lng = options?.lng ?? 127.0276
   const radius = options?.radius ?? 1000
   const count = options?.count ?? 20
+  const categoryCode = options?.categoryCode ?? null
+  const subFilter = options?.subFilter ?? null
 
-  // 음식점 + 카페 동시 검색
-  const [restaurants, cafes] = await Promise.all([
-    searchNearbyByCategory({
-      categoryCode: KAKAO_CATEGORY.RESTAURANT,
+  let places: KakaoPlace[]
+
+  if (categoryCode) {
+    // 특정 카테고리만 검색 (카카오 카테고리 API size 최대 15)
+    places = await searchNearbyByCategory({
+      categoryCode,
       lat,
       lng,
       radius,
-      size: Math.min(45, Math.ceil(count * 0.7)),
-    }),
-    searchNearbyByCategory({
-      categoryCode: KAKAO_CATEGORY.CAFE,
-      lat,
-      lng,
-      radius,
-      size: Math.min(45, Math.ceil(count * 0.3)),
-    }),
-  ])
+      size: Math.min(15, count),
+    })
+  } else {
+    // 전체: 모든 카테고리 동시 검색
+    const allCategories = Object.values(KAKAO_CATEGORY)
+    const results = await Promise.all(
+      allCategories.map((code) =>
+        searchNearbyByCategory({
+          categoryCode: code,
+          lat,
+          lng,
+          radius,
+          size: 15,
+        }).catch(() => [] as KakaoPlace[])
+      )
+    )
+    // 중복 제거 (같은 place ID)
+    const seen = new Set<string>()
+    places = results.flat().filter((p) => {
+      if (seen.has(p.id)) return false
+      seen.add(p.id)
+      return true
+    })
+  }
 
-  // 합치기 → 거리순 정렬 → 상위 count개
-  const combined = [...restaurants, ...cafes]
+  // 서브카테고리 필터 (category_name에 keyword 포함 여부)
+  const filtered = subFilter
+    ? places.filter((p) => p.category_name.includes(subFilter))
+    : places
+
+  // 거리순 정렬 (전체 카테고리일 때는 전부 표시, 개별 카테고리는 count 제한)
+  const sorted = filtered
     .sort((a, b) => parseInt(a.distance || "0") - parseInt(b.distance || "0"))
-    .slice(0, count)
+  const combined = categoryCode ? sorted.slice(0, count) : sorted
 
-  // ── 추후: Firestore에서 rating 로드 후 rating 내림차순 재정렬 ─────────────
-  // const enriched = await Promise.all(combined.map(enrichWithFirestoreStats))
-  // return enriched
-  //   .sort((a, b) => b.rating - a.rating)
-  //   .map((s, i) => ({ ...s, rank: i + 1 }))
-  // ──────────────────────────────────────────────────────────────────────────
+  // Firestore stats 병렬 조회
+  const statsArray = await Promise.all(
+    combined.map((place) => fetchFirestoreStats(place.id))
+  )
 
-  return combined.map((place, idx) => kakaoToRankedSpot(place, idx + 1))
+  // 모든 Spot은 기본 rank = 0 (순위 없음)
+  const spots = combined.map((place, idx) =>
+    kakaoToRankedSpot(place, 0, statsArray[idx])
+  )
+
+  // 리뷰 있는 Spot만 평점순으로 순위 부여
+  const withReview = spots.filter((s) => s.reviewCount > 0)
+  if (withReview.length > 0) {
+    withReview.sort((a, b) => b.rating - a.rating)
+    withReview.forEach((s, i) => { s.rank = i + 1 })
+  }
+
+  // 리뷰 있는 Spot 상단, 없는 Spot 하단
+  const withoutReview = spots.filter((s) => s.reviewCount === 0)
+  return [...withReview, ...withoutReview]
 }
 
 /**

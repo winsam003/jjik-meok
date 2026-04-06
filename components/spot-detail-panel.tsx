@@ -189,8 +189,14 @@ export default function SpotDetailPanel({ spot, open, onClose, onOpenRanking }: 
 
           {/* 평점 요약 */}
           <div className="flex items-center gap-2 mt-3">
-            <span className="text-2xl font-black text-zinc-900">{spot.rating}★</span>
-            <span className="text-sm text-zinc-400">({spot.reviewCount.toLocaleString()}개 리뷰)</span>
+            {spot.reviewCount > 0 ? (
+              <>
+                <span className="text-2xl font-black text-zinc-900">{spot.rating}★</span>
+                <span className="text-sm text-zinc-400">({spot.reviewCount.toLocaleString()}개 리뷰)</span>
+              </>
+            ) : (
+              <span className="text-sm text-zinc-400">아직 리뷰가 없어요</span>
+            )}
             <span className="text-xs font-bold text-zinc-400">· {spot.distance}</span>
           </div>
         </div>

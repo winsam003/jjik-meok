@@ -29,6 +29,22 @@ export async function GET(request: NextRequest) {
   const size = searchParams.get("size") ?? "15"
   const page = searchParams.get("page") ?? "1"
 
+  // 키워드도 없고 카테고리도 없으면 400
+  if (!query && !category_group_code) {
+    return NextResponse.json(
+      { error: "query 또는 category_group_code 파라미터가 필요합니다" },
+      { status: 400 }
+    )
+  }
+
+  // 카테고리 검색 시 x, y 필수 검증
+  if (!query && category_group_code && (!x || !y)) {
+    return NextResponse.json(
+      { error: "카테고리 검색 시 x(경도), y(위도) 파라미터가 필요합니다" },
+      { status: 400 }
+    )
+  }
+
   // 키워드 검색 vs 카테고리 검색 분기
   let apiUrl: string
   const params = new URLSearchParams()
@@ -38,7 +54,7 @@ export async function GET(request: NextRequest) {
     params.set("query", query)
   } else {
     apiUrl = "https://dapi.kakao.com/v2/local/search/category.json"
-    if (category_group_code) params.set("category_group_code", category_group_code)
+    params.set("category_group_code", category_group_code!)
   }
 
   if (x) params.set("x", x)
@@ -46,7 +62,10 @@ export async function GET(request: NextRequest) {
   params.set("radius", radius)
   params.set("size", size)
   params.set("page", page)
-  params.set("sort", "distance") // 거리순 정렬
+  // x, y 있을 때만 distance 정렬, 없으면 accuracy
+  params.set("sort", x && y ? "distance" : "accuracy")
+
+  console.log("[kakao/places] →", apiUrl, params.toString())
 
   try {
     const res = await fetch(`${apiUrl}?${params.toString()}`, {
